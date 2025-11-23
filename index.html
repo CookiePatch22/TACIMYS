@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Service Monitor</title>
+    <link href="style.css" rel="stylesheet" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="navbar-container">
+        <div class="navbar-brand">
+          <div class="logo">
+            <img src="assets/icons/take_a_coffee_im_monitoring_your_services.svg" height="40px" class="logo-icon" alt="Logo" />
+            <span class="brand-text">TACIMYS</span>
+          </div>
+        </div>
+
+        <div class="navbar-search">
+          <div class="search-wrapper">
+            <img src="assets/icons/search.svg" class="search-icon" alt="Search" />
+            <input
+              type="text"
+              id="search-input"
+              class="search-input"
+              placeholder="Search services, status..."
+              onkeyup="handleSearch()"
+            />
+          </div>
+        </div>
+
+        <div class="navbar-right">
+          <a id="link-buymeacoffee" href="https://buymeacoffee.com/nicolasbrg" target="_blank" rel="noopener">
+            <img src="assets/icons/bmc-logo.svg" height="30px" alt="Buy Me A Coffee Logo" />
+          </a>
+          <button
+            class="btn-groups-nav"
+            onclick="openGroupsModal()"
+            title="Manage Groups"
+          >
+            <img src="assets/icons/users.svg" alt="Groups" />
+          </button>
+          <button class="btn-add-nav" onclick="openAddModal()">
+            <img src="assets/icons/add.svg" alt="Add" />
+          </button>
+          <div class="user-menu">
+            <span id="username-display" class="username-text"></span>
+            <button class="btn-disconnect" onclick="logout()">
+              <img src="assets/icons/disconnect.svg" alt="Disconnect" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container">
+      <div class="header-section">
+        <div>
+          <h1>Service Monitor</h1>
+          <p class="subtitle">Track and monitor service health in real-time</p>
+        </div>
+      </div>
+
+      <div id="services-container" class="services-list">
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>Loading services...</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="result-modal" class="result-modal">
+      <div class="result-modal-content">
+        <div class="result-close-btn" onclick="closeResultModal()">
+          <img src="assets/icons/close.svg" alt="Close">
+        </div>
+        <div class="result-modal-header">Service Check Result</div>
+        <div id="result-content"></div>
+      </div>
+    </div>
+
+    <div id="login-modal" class="modal login-modal">
+      <div class="modal-content login-modal-content">
+        <div class="modal-header">Sign In</div>
+        <form onsubmit="handleLogin(event)">
+          <div class="form-group">
+            <label for="login-username">Username</label>
+            <input type="text" id="login-username" name="username" required />
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input
+              type="password"
+              id="login-password"
+              name="password"
+              required
+            />
+          </div>
+          <button type="submit" class="btn-submit">Sign In</button>
+          <div id="login-error" class="login-error"></div>
+          <div class="auth-switch">
+            Don't have an account?
+            <button type="button" onclick="switchToRegister()" class="link-btn">
+              Create one
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="register-modal" class="modal login-modal">
+      <div class="modal-content login-modal-content">
+        <div class="modal-header">Create Account</div>
+        <form onsubmit="handleRegister(event)">
+          <div class="form-group">
+            <label for="register-username">Username</label>
+            <input
+              type="text"
+              id="register-username"
+              name="username"
+              required
+            />
+          </div>
+          <div class="form-group">
+            <label for="register-password">Password</label>
+            <input
+              type="password"
+              id="register-password"
+              name="password"
+              required
+              minlength="8"
+            />
+            <small class="condition">Minimum 8 characters</small
+            >
+          </div>
+          <div class="form-group">
+            <label for="register-password-confirm">Confirm Password</label>
+            <input
+              type="password"
+              id="register-password-confirm"
+              name="password-confirm"
+              required
+            />
+          </div>
+          <button type="submit" class="btn-submit">Create Account</button>
+          <div id="register-error" class="login-error"></div>
+          <div class="auth-switch">
+            Already have an account?
+            <button type="button" onclick="switchToLogin()" class="link-btn">
+              Sign in
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header" id="modal-title">Add New Service</div>
+        <form onsubmit="handleSubmit(event)">
+          <div class="form-group">
+            <label for="name">Service Name *</label>
+            <input
+              type="text"
+              id="name"
+              name="name"
+              required
+              placeholder="e.g., Production API"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="type">Request Type *</label>
+            <select
+              id="type"
+              name="type"
+              required
+              onchange="updateRequestTypeFields()"
+            >
+              <option value="">Select type</option>
+              <option value="ping">Ping (ICMP)</option>
+              <option value="http-get">HTTP GET</option>
+              <option value="http-post">HTTP POST</option>
+              <option value="http-put">HTTP PUT</option>
+            </select>
+          </div>
+
+          <div id="request-body-field" class="form-group" style="display: none">
+            <label for="request-body">Request Body (JSON)</label>
+            <textarea
+              id="request-body"
+              name="request-body"
+              placeholder='{"key": "value"}'
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="target"
+              >Target <span id="target-label-type">URL</span> *</label
+            >
+            <input
+              type="text"
+              id="target"
+              name="target"
+              required
+              placeholder="https://example.com/health or hostname/IP"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="frequency">Check Frequency (minutes) *</label>
+            <input
+              type="number"
+              id="frequency"
+              name="frequency"
+              min="1"
+              value="60"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="history-count">History Count (number of bars)</label>
+            <input
+              type="number"
+              id="history-count"
+              name="history-count"
+              min="1"
+              max="200"
+              value="24"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="max-retention">Max Retention (hours)</label>
+            <input
+              type="number"
+              id="max-retention"
+              name="max-retention"
+              min="1"
+              max="720"
+              value="24"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="auth-type">Authentication Type</label>
+            <select
+              id="auth-type"
+              name="auth-type"
+              onchange="updateAuthFields()"
+            >
+              <option value="">None</option>
+              <option value="bearer">Bearer Token</option>
+              <option value="basic">Username + Password</option>
+              <option value="header">Custom Header</option>
+            </select>
+          </div>
+
+          <div id="bearer-fields" class="auth-fields" style="display: none">
+            <div class="form-group">
+              <label for="bearer-token">Bearer Token *</label>
+              <input
+                type="password"
+                id="bearer-token"
+                name="bearer-token"
+                placeholder="Enter your bearer token"
+              />
+            </div>
+          </div>
+
+          <div id="basic-fields" class="auth-fields" style="display: none">
+            <div class="form-group">
+              <label for="username">Username *</label>
+              <input
+                type="text"
+                id="username"
+                name="username"
+                placeholder="Enter username"
+              />
+            </div>
+            <div class="form-group">
+              <label for="password">Password *</label>
+              <input
+                type="password"
+                id="password"
+                name="password"
+                placeholder="Enter password"
+              />
+            </div>
+          </div>
+
+          <div id="header-fields" class="auth-fields" style="display: none">
+            <div class="form-group">
+              <label for="header-name">Header Name *</label>
+              <input
+                type="text"
+                id="header-name"
+                name="header-name"
+                placeholder="e.g., X-API-Key"
+              />
+            </div>
+            <div class="form-group">
+              <label for="header-value">Header Value *</label>
+              <input
+                type="password"
+                id="header-value"
+                name="header-value"
+                placeholder="Enter header value"
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Rules</label>
+            <div class="rules-builder" id="rules-builder">
+              <div class="rules-builder-header">
+                <span>Conditions</span>
+                <button
+                  type="button"
+                  class="btn-add-condition"
+                  onclick="addRuleCondition()"
+                >
+                  <img src="assets/icons/add.svg" alt="Add" />
+                  Add Condition
+                </button>
+              </div>
+              <div class="rules-list" id="rules-list"></div>
+            </div>
+            <textarea id="rules" name="rules" style="display: none"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Group Permissions</label>
+            <div
+              class="group-permissions-builder"
+              id="group-permissions-builder"
+            >
+              <div class="permissions-header">
+                <span>Configure access by group</span>
+                <div
+                  class="permissions-search-wrapper"
+                  style="margin-top: 12px; position: relative; width: 100%"
+                >
+                  <img src="assets/icons/search.svg" class="search-icon" alt="Search" />
+                  <input
+                    type="text"
+                    id="permissions-group-search"
+                    class="permissions-group-search"
+                    placeholder="Search and add groups..."
+                    style="
+                      width: 100%;
+                      padding: 8px 12px 8px 32px;
+                      border: 1px solid #e5e5e5;
+                      border-radius: 4px;
+                      font-size: 13px;
+                      background: white;
+                      box-sizing: border-box;
+                    "
+                  />
+                  <div
+                    id="permissions-search-results"
+                    class="permissions-search-results"
+                    style="
+                      display: none;
+                      border: 1px solid #e5e5e5;
+                      border-radius: 4px;
+                      background: white;
+                      max-height: 200px;
+                      overflow-y: auto;
+                      z-index: 1000;
+                      position: absolute;
+                      top: 100%;
+                      left: 0;
+                      right: 0;
+                      margin-top: 4px;
+                      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                    "
+                  ></div>
+                </div>
+              </div>
+              <div class="permissions-list" id="permissions-list"></div>
+            </div>
+            <textarea
+              id="group-permissions"
+              name="group-permissions"
+              style="display: none"
+            ></textarea>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn-cancel" onclick="closeModal()">
+              Cancel
+            </button>
+            <button type="submit" class="btn-submit" id="submit-btn">
+              Create Service
+            </button>
+          </div>
+        </form>
+        <div
+          id="delete-section"
+          style="
+            display: none;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid #e5e5e5;
+          "
+        >
+          <button
+            type="button"
+            class="btn-delete-modal"
+            onclick="deleteService(currentEditingServiceId)"
+          >
+            Delete Service
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="groups-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <span>Manage Groups</span>
+          <button class="modal-close-btn" onclick="closeGroupsModal()">
+            <img src="assets/icons/close.svg" alt="Close" />
+          </button>
+        </div>
+
+        <div class="groups-modal-tabs">
+          <button
+            class="groups-tab-btn active"
+            onclick="switchGroupsTab('browse')"
+          >
+            Browse Groups
+          </button>
+          <button class="groups-tab-btn" onclick="switchGroupsTab('create')">
+            Create Group
+          </button>
+        </div>
+
+        <div id="groups-browse-tab" class="groups-tab-content active">
+          <div class="groups-search-wrapper">
+            <img src="assets/icons/search.svg" class="search-icon" alt="Search" />
+            <input
+              type="text"
+              id="groups-search-input"
+              class="groups-search-input"
+              placeholder="Search groups..."
+              onkeyup="handleGroupsSearch()"
+            />
+          </div>
+          <div id="groups-list-container" class="groups-list-container"></div>
+        </div>
+
+        <div id="groups-create-tab" class="groups-tab-content">
+          <div class="create-group-form">
+            <div class="form-group">
+              <label for="new-group-name">Group Name</label>
+              <input
+                type="text"
+                id="new-group-name"
+                placeholder="Enter group name"
+              />
+            </div>
+            <button type="button" class="btn-submit" onclick="createNewGroup()">
+              Create Group
+            </button>
+            <div id="create-group-error" class="form-error"></div>
+          </div>
+        </div>
+
+        <div id="groups-edit-tab" class="groups-tab-content">
+          <div class="edit-group-wrapper">
+            <div class="edit-group-header">
+              <h3 id="edit-group-name"></h3>
+              <button
+                type="button"
+                class="btn-back"
+                onclick="backToGroupsList()"
+              >
+                ← Back
+              </button>
+            </div>
+            <div class="edit-group-info">
+              <p id="edit-group-owner" style="font-size: 12px; color: #666"></p>
+            </div>
+            <div class="members-section">
+              <div class="members-header">
+                <h4>Members</h4>
+                <button
+                  type="button"
+                  class="btn-add-member"
+                  onclick="openAddMemberForm()"
+                >
+                  + Add Member
+                </button>
+              </div>
+              <div id="members-list" class="members-list"></div>
+            </div>
+            <div
+              id="add-member-form"
+              class="add-member-form"
+              style="display: none"
+            >
+              <div class="search-user-wrapper">
+                <img src="assets/icons/search.svg" class="search-icon" alt="Search" />
+                <input
+                  type="text"
+                  id="user-search-input"
+                  class="user-search-input"
+                  placeholder="Search users..."
+                  onkeyup="handleUserSearch()"
+                />
+              </div>
+              <div id="user-search-results" class="user-search-results"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="./front/variables.js"></script>
+    <script src="./front/auth/auth.js"></script>
+    <script src="./front/auth/login_modal.js"></script>
+    <script src="./front/builders/groups.js"></script>
+    <script src="./front/builders/permissions.js"></script>
+    <script src="./front/builders/rules.js"></script>
+    <script src="./front/builders/user.js"></script>
+    <script src="./front/services/api.js"></script>
+    <script src="./front/services/filter.js"></script>
+    <script src="./front/services/render.js"></script>
+    <script src="./front/utils/helpers.js"></script>
+    <script src="./front/utils/modals.js"></script>
+    <script>
+      // Setting-up events
+      document
+        .getElementById('modal')
+        .addEventListener('click', closeModalOnOutsideClick);
+      document
+        .getElementById('groups-modal')
+        .addEventListener('click', closeModalOnOutsideClick);
+      document
+        .getElementById('result-modal')
+        .addEventListener('click', closeModalOnOutsideClick);
+
+      // Initialize auth and services
+      checkAuth();
+      setInterval(() => {
+        if (currentToken) {
+          loadServices();
+        }
+      }, 5000);
+
+      loadServices();
+    </script>
+  </body>
+</html>
