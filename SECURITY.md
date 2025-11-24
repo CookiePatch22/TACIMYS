@@ -1,9 +1,9 @@
-## Simple TLS & mTLS Certificate Generation (Minimal & Clean)
+## Simple TLS & mTLS Certificate Generation
 
 This guide explains a **very simplified** method to generate certificates for:
 
 * **Server TLS** (with SAN provided directly as command arguments)
-* **Client certificate for mTLS** (no SAN required)
+* **Client certificate for mTLS**
 * **No extra config files**
 * **No unnecessary OpenSSL files**
 
@@ -46,7 +46,7 @@ ca.crt  # Root CA certificate
 
 ---
 
-# 3. Create the Server Certificate (with SAN inline)
+# 3. Create the Server Certificate
 
 ### 3.1 Generate private key
 
@@ -75,7 +75,7 @@ server.crt
 
 ---
 
-# 4. Create a Client Certificate (NO SAN REQUIRED)
+# 4. Create a Client Certificate
 
 ### 4.1 Generate client key
 
@@ -83,7 +83,7 @@ server.crt
 openssl genrsa -out client.key 2048
 ```
 
-### 4.2 Create CSR (simple, no SAN)
+### 4.2 Create CSR
 
 ```bash
 openssl req -new -key client.key -out client.csr -subj "/CN=client"
