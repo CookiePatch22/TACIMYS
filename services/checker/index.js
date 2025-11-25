@@ -3,6 +3,7 @@ const { checkHttpService } = require("./http");
 
 const { readData, writeData } = require("./../data");
 const { readHistory, writeHistory } = require("./../history");
+const { DATA_FILE } = require("./../../config");
 
 
 async function checkService(service) {
@@ -23,7 +24,7 @@ async function checkService(service) {
 
 async function pollServices() {
   try {
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const now = new Date();
     let modified = false;
 
@@ -62,7 +63,7 @@ async function pollServices() {
     }
 
     if (modified) {
-      await writeData(data);
+      await writeData(DATA_FILE, data);
       console.log('Services updated');
     }
   } catch (err) {

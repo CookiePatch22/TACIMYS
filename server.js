@@ -17,7 +17,8 @@ const { readData, writeData } = require('./services/data');
 const { readHistory, writeHistory } = require('./services/history');
 const { canViewService, canEditService, filterServiceData } = require('./utils/permissions');
 const { pollServices } = require("./services/checker/index")
-const { tlsConfig, HISTORY_DIR, JWT_SECRET, PORT } = require('./config');
+const { DATA_FILE, tlsConfig, HISTORY_DIR, JWT_SECRET, PORT } = require('./config');
+const { unit_tests } = require("./tests")
 
 // Setup express server
 const app = express();
@@ -49,7 +50,7 @@ app.post('/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 8 characters long' });
     }
 
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const userExists = Object.values(data.users).find(u => u.username === username);
 
     if (userExists) {
@@ -65,7 +66,7 @@ app.post('/auth/register', async (req, res) => {
     };
 
     data.users[userId] = newUser;
-    await writeData(data);
+    await writeData(DATA_FILE, data);
 
     const token = jwt.sign({ userId: userId, username: username }, JWT_SECRET, { expiresIn: '7d' });
     res.status(201).json({ token, userId: userId, username: username });
@@ -78,7 +79,7 @@ app.post('/auth/register', async (req, res) => {
 app.post('/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const userId = Object.keys(data.users).find(id => data.users[id].username === username);
     const user = userId ? data.users[userId] : null;
 
@@ -101,7 +102,7 @@ app.post('/auth/login', async (req, res) => {
 
 app.get('/auth/user', verifyToken, async (req, res) => {
   try {
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const user = data.users[req.userId];
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ id: req.userId, username: user.username, groups: user.groups || [] });
@@ -113,7 +114,7 @@ app.get('/auth/user', verifyToken, async (req, res) => {
 // Group management endpoints
 app.get('/groups', verifyToken, async (req, res) => {
   try {
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const groupsData = data.groups || {};
     const groupsList = Object.entries(groupsData).map(([name, group]) => {
       const memberDetails = {};
@@ -144,7 +145,7 @@ app.post('/groups', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Group name is required' });
     }
 
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     if (data.groups && data.groups[name]) {
       return res.status(409).json({ error: 'Group already exists' });
     }
@@ -161,7 +162,7 @@ app.post('/groups', verifyToken, async (req, res) => {
       user.groups.push(name);
     }
 
-    await writeData(data);
+    await writeData(DATA_FILE, data);
     const ownerUser = data.users[req.userId];
     const memberDetails = {};
     memberDetails[req.userId] = { username: ownerUser.username };
@@ -183,7 +184,7 @@ app.put('/groups/:name', verifyToken, async (req, res) => {
     const { name } = req.params;
     const { action, userId } = req.body;
 
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const group = data.groups && data.groups[name];
     if (!group) {
       return res.status(404).json({ error: 'Group not found' });
@@ -212,7 +213,7 @@ app.put('/groups/:name', verifyToken, async (req, res) => {
       }
     }
 
-    await writeData(data);
+    await writeData(DATA_FILE, data);
     const memberDetails = {};
     (group.members || []).forEach(memberId => {
       const user = data.users[memberId];
@@ -236,7 +237,7 @@ app.put('/groups/:name', verifyToken, async (req, res) => {
 app.get('/groups/:name', verifyToken, async (req, res) => {
   try {
     const { name } = req.params;
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const group = data.groups && data.groups[name];
     if (!group) {
       return res.status(404).json({ error: 'Group not found' });
@@ -265,7 +266,7 @@ app.get('/groups/:name', verifyToken, async (req, res) => {
 app.delete('/groups/:name', verifyToken, async (req, res) => {
   try {
     const { name } = req.params;
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const group = data.groups && data.groups[name];
 
     if (!group) {
@@ -294,7 +295,7 @@ app.delete('/groups/:name', verifyToken, async (req, res) => {
       user.groups = user.groups.filter(g => g !== name);
     }
 
-    await writeData(data);
+    await writeData(DATA_FILE, data);
     res.status(204).send();
   } catch (err) {
     console.error('Error deleting group:', err);
@@ -306,7 +307,7 @@ app.delete('/groups/:name', verifyToken, async (req, res) => {
 app.get('/users/search', verifyToken, async (req, res) => {
   try {
     const { q } = req.query;
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const users = Object.entries(data.users || {})
       .map(([id, user]) => ({ id, username: user.username }))
       .filter(u => !q || u.username.toLowerCase().includes(q.toLowerCase()));
@@ -318,7 +319,7 @@ app.get('/users/search', verifyToken, async (req, res) => {
 
 app.get('/users/all', verifyToken, async (req, res) => {
   try {
-    const data = await readData();
+    const data = await readData(DATA_FILE);
     const users = Object.entries(data.users || {})
       .map(([id, user]) => ({ id, username: user.username }));
     res.json(users);
@@ -329,7 +330,7 @@ app.get('/users/all', verifyToken, async (req, res) => {
 
 // Service management endpoints
 app.get('/services', verifyToken, async (req, res) => {
-  const data = await readData();
+  const data = await readData(DATA_FILE);
   const user = data.users[req.userId];
   const userGroups = user?.groups || [];
   const accessibleServices = data.services
@@ -339,7 +340,7 @@ app.get('/services', verifyToken, async (req, res) => {
 });
 
 app.get('/services/:id', verifyToken, async (req, res) => {
-  const data = await readData();
+  const data = await readData(DATA_FILE);
   const user = data.users[req.userId];
   const userGroups = user?.groups || [];
   const service = data.services.find(s => s.id === parseInt(req.params.id));
@@ -352,7 +353,7 @@ app.get('/services/:id', verifyToken, async (req, res) => {
 });
 
 app.get('/services/:id/history', verifyToken, async (req, res) => {
-  const data = await readData();
+  const data = await readData(DATA_FILE);
   const user = data.users[req.userId];
   const userGroups = user?.groups || [];
   const service = data.services.find(s => s.id === parseInt(req.params.id));
@@ -364,7 +365,7 @@ app.get('/services/:id/history', verifyToken, async (req, res) => {
 });
 
 app.post('/services', verifyToken, async (req, res) => {
-  const data = await readData();
+  const data = await readData(DATA_FILE);
   const newService = {
     id: Date.now(),
     owner_id: req.userId,
@@ -377,7 +378,7 @@ app.post('/services', verifyToken, async (req, res) => {
   };
 
   data.services.push(newService);
-  await writeData(data);
+  await writeData(DATA_FILE, data);
 
   // Create empty history file
   await writeHistory(newService.id, []);
@@ -386,7 +387,7 @@ app.post('/services', verifyToken, async (req, res) => {
 });
 
 app.put('/services/:id', verifyToken, async (req, res) => {
-  const data = await readData();
+  const data = await readData(DATA_FILE);
   const user = data.users[req.userId];
   const userGroups = user?.groups || [];
   const index = data.services.findIndex(s => s.id === parseInt(req.params.id));
@@ -395,12 +396,12 @@ app.put('/services/:id', verifyToken, async (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
   data.services[index] = { ...data.services[index], ...req.body };
-  await writeData(data);
+  await writeData(DATA_FILE, data);
   res.json(data.services[index]);
 });
 
 app.delete('/services/:id', verifyToken, async (req, res) => {
-  const data = await readData();
+  const data = await readData(DATA_FILE);
   const user = data.users[req.userId];
   const userGroups = user?.groups || [];
   const index = data.services.findIndex(s => s.id === parseInt(req.params.id));
@@ -410,7 +411,7 @@ app.delete('/services/:id', verifyToken, async (req, res) => {
   }
 
   const [removed] = data.services.splice(index, 1);
-  await writeData(data);
+  await writeData(DATA_FILE, data);
 
   try {
     await fs.unlink(path.join(HISTORY_DIR, `${removed.id}.json`));
@@ -419,20 +420,24 @@ app.delete('/services/:id', verifyToken, async (req, res) => {
   res.status(204).send();
 });
 
-// Starting service polling loop
-setInterval(pollServices, 6000);
+// Perform tests
+unit_tests().then(() => {
+  // Starting service polling loop
+  setInterval(pollServices, 6000);
 
-// Starting server
-if (tlsConfig) {
-  server = https.createServer(tlsConfig, app);
-  server.listen(PORT, () => {
-    console.log(`HTTPS server running on port ${PORT}`);
-    pollServices();
-  });
-} else {
-  server = http.createServer(app);
-  server.listen(PORT, () => {
-    console.log(`HTTP server running on port ${PORT}`);
-    pollServices();
-  });
-}
+  // Starting server
+  if (tlsConfig) {
+    server = https.createServer(tlsConfig, app);
+    server.listen(PORT, () => {
+      console.log(`HTTPS server running on port ${PORT}`);
+      pollServices();
+    });
+  } else {
+    server = http.createServer(app);
+    server.listen(PORT, () => {
+      console.log(`HTTP server running on port ${PORT}`);
+      pollServices();
+    });
+  }
+})
+
