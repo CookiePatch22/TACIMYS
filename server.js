@@ -1,21 +1,25 @@
 // Enable env
 require('dotenv').config();
 
+// Importing external libraries
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
-const fetch = require('node-fetch');
-const ping = require('ping');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const https = require('https');
 const http = require('http');
-const fsSync = require('fs');
 
-// Used for mTLS certificate generation (security)
-const tracking_key = [184, 9, 9, 193, 10, 11, 603, 603, 64, 193, 13, 170, 26, 235, 285, 235, 418, 418, 83, 479, 549, 83, 89, 83, 336, 89, 83, 89, 14, 29, 33, 2, 2, 14, 83, 2, 2, 26, 2, 193, 9, 6, 33, 14, 26, 6, 64, 603, 184, 2, 18, 84, 9, 184, 104, 26, 184, 2, 26, 202];
+// Importing locals variables
+const { verifyToken } = require('./middleware/auth');
+const { readData, writeData } = require('./services/data');
+const { readHistory, writeHistory } = require('./services/history');
+const { canViewService, canEditService, filterServiceData } = require('./utils/permissions');
+const { pollServices } = require("./services/checker/index")
+const { tlsConfig, HISTORY_DIR, JWT_SECRET, PORT } = require('./config');
 
+// Setup express server
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => {
@@ -27,76 +31,8 @@ app.use((req, res, next) => {
 });
 app.use(express.static(__dirname));
 
-const DATA_FILE = path.join(__dirname, 'conf.json');
-const HISTORY_DIR = path.join(__dirname, 'history');
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-
 // Ensure history directory exists
 fs.mkdir(HISTORY_DIR, { recursive: true });
-
-// JWT middleware
-function verifyToken(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'No token provided' });
-  }
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.userId;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid or expired token' });
-  }
-}
-
-// Authorization helper
-function canViewService(service, userId, userGroups) {
-  if (service.owner_id === userId) return true;
-  const permissions = service.group_permissions || {};
-  return userGroups.some(groupName => {
-    const groupPerms = permissions[groupName];
-    return groupPerms && (groupPerms.includes('VIEW') || groupPerms.includes('EDIT'));
-  });
-}
-
-function canEditService(service, userId, userGroups) {
-  if (service.owner_id === userId) return true;
-  const permissions = service.group_permissions || {};
-  return userGroups.some(groupName => {
-    const groupPerms = permissions[groupName];
-    return groupPerms && groupPerms.includes('EDIT');
-  });
-}
-
-// -------------------------------------------------------
-//  Data Layer
-// -------------------------------------------------------
-async function readData() {
-  const raw = await fs.readFile(DATA_FILE, 'utf-8');
-  return JSON.parse(raw);
-}
-
-async function writeData(data) {
-  await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2));
-}
-
-async function readHistory(id) {
-  const file = path.join(HISTORY_DIR, `${id}.json`);
-  try {
-    const raw = await fs.readFile(file, 'utf-8');
-    return JSON.parse(raw);
-  } catch (e) {
-    return []; // no history yet
-  }
-}
-
-async function writeHistory(id, history) {
-  const file = path.join(HISTORY_DIR, `${id}.json`);
-  await fs.writeFile(file, JSON.stringify(history, null, 2));
-}
 
 // -------------------------------------------------------
 //  REST API
@@ -326,6 +262,47 @@ app.get('/groups/:name', verifyToken, async (req, res) => {
   }
 });
 
+app.delete('/groups/:name', verifyToken, async (req, res) => {
+  try {
+    const { name } = req.params;
+    const data = await readData();
+    const group = data.groups && data.groups[name];
+
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    if (group.owner_id !== req.userId) {
+      return res.status(403).json({ error: 'Only the group owner can delete the group' });
+    }
+
+    const isSoleOwner = group.members && group.members.length === 1 && group.members[0] === req.userId;
+    if (!isSoleOwner) {
+      return res.status(400).json({ error: 'You can only delete a group if you are the only remaining member' });
+    }
+
+    delete data.groups[name];
+
+    data.services.forEach(service => {
+      if (service.group_permissions && service.group_permissions[name]) {
+        delete service.group_permissions[name];
+      }
+    });
+
+    const user = data.users[req.userId];
+    if (user && user.groups) {
+      user.groups = user.groups.filter(g => g !== name);
+    }
+
+    await writeData(data);
+    res.status(204).send();
+  } catch (err) {
+    console.error('Error deleting group:', err);
+    res.status(500).json({ error: 'Failed to delete group' });
+  }
+});
+
+// User management endpoints
 app.get('/users/search', verifyToken, async (req, res) => {
   try {
     const { q } = req.query;
@@ -350,6 +327,7 @@ app.get('/users/all', verifyToken, async (req, res) => {
   }
 });
 
+// Service management endpoints
 app.get('/services', verifyToken, async (req, res) => {
   const data = await readData();
   const user = data.users[req.userId];
@@ -359,18 +337,6 @@ app.get('/services', verifyToken, async (req, res) => {
     .map(s => filterServiceData(s, req.userId, userGroups));
   res.json(accessibleServices);
 });
-
-function filterServiceData(service, userId, userGroups) {
-  const isOwner = service.owner_id === userId;
-  const canEdit = canEditService(service, userId, userGroups);
-
-  if (isOwner || canEdit) {
-    return service;
-  }
-
-  const { auth_config, bearer_token, password, header_value, credentials_refs, ...filtered } = service;
-  return filtered;
-}
 
 app.get('/services/:id', verifyToken, async (req, res) => {
   const data = await readData();
@@ -448,288 +414,15 @@ app.delete('/services/:id', verifyToken, async (req, res) => {
 
   try {
     await fs.unlink(path.join(HISTORY_DIR, `${removed.id}.json`));
-  } catch (_) {}
+  } catch (_) { }
 
   res.status(204).send();
 });
 
-app.delete('/groups/:name', verifyToken, async (req, res) => {
-  try {
-    const { name } = req.params;
-    const data = await readData();
-    const group = data.groups && data.groups[name];
-
-    if (!group) {
-      return res.status(404).json({ error: 'Group not found' });
-    }
-
-    if (group.owner_id !== req.userId) {
-      return res.status(403).json({ error: 'Only the group owner can delete the group' });
-    }
-
-    const isSoleOwner = group.members && group.members.length === 1 && group.members[0] === req.userId;
-    if (!isSoleOwner) {
-      return res.status(400).json({ error: 'You can only delete a group if you are the only remaining member' });
-    }
-
-    delete data.groups[name];
-
-    data.services.forEach(service => {
-      if (service.group_permissions && service.group_permissions[name]) {
-        delete service.group_permissions[name];
-      }
-    });
-
-    const user = data.users[req.userId];
-    if (user && user.groups) {
-      user.groups = user.groups.filter(g => g !== name);
-    }
-
-    await writeData(data);
-    res.status(204).send();
-  } catch (err) {
-    console.error('Error deleting group:', err);
-    res.status(500).json({ error: 'Failed to delete group' });
-  }
-});
-
-// -------------------------------------------------------
-//  Service checker
-// -------------------------------------------------------
-async function checkService(service) {
-  try {
-    if (service.type === "ping") {
-      return await checkPingService(service);
-    }
-
-    if (service.type && service.type.startsWith("http-")) {
-      return await checkHttpService(service);
-    }
-
-    return { color: "#808080", match: "unknown_type" };
-  } catch (err) {
-    return { color: "#FF0000", match: `error: ${err.message}` };
-  }
-}
-
-/* ---------------------------- PING SERVICE ----------------------------- */
-
-function extractHostFromUrl(url) {
-  return url.replace(/^https?:\/\//, "");
-}
-
-async function checkPingService(service) {
-  const host = extractHostFromUrl(service.target);
-
-  const result = await ping.promise.probe(host, {
-    timeout: 10,
-    min_reply: 1,
-    extra: ["-n", "1"]
-  });
-
-  const pingText = result.output || JSON.stringify(result);
-
-  const matchResult = applyRules(service.rules, pingText, result);
-  if (matchResult) return matchResult;
-
-  if (result.alive) {
-    return {
-      color: "#00ff00",
-      match: `ping_alive (${result.time}ms)`,
-      raw_response: result
-    };
-  }
-
-  return { color: "#FF0000", match: "ping_failed", raw_response: result };
-}
-
-/* ---------------------------- HTTP SERVICE ----------------------------- */
-
-function buildHttpHeaders(service) {
-  const headers = { "Content-Type": "application/json" };
-
-  if (!service.auth_config) return headers;
-
-  const auth = service.auth_config;
-  if (auth.type === "bearer") {
-    headers.Authorization = `Bearer ${auth.token}`;
-  } else if (auth.type === "basic") {
-    const credentials = Buffer.from(`${auth.username}:${auth.password}`).toString("base64");
-    headers.Authorization = `Basic ${credentials}`;
-  } else if (auth.type === "header") {
-    headers[auth.name] = auth.value;
-  }
-
-  return headers;
-}
-
-function getHttpMethod(type) {
-  switch (type) {
-    case "http-get": return "GET";
-    case "http-post": return "POST";
-    case "http-put": return "PUT";
-    default: return "GET";
-  }
-}
-
-async function checkHttpService(service) {
-  const headers = buildHttpHeaders(service);
-  const method = getHttpMethod(service.type);
-
-  const response = await fetch(service.target, {
-    method,
-    headers,
-    body:
-      (method === "POST" || method === "PUT") && service.request_body
-        ? JSON.stringify(service.request_body)
-        : undefined
-  });
-
-  const body = await response.text();
-
-  const rawResponse = {
-    status: response.status,
-    headers: Object.fromEntries(response.headers),
-    body: body.substring(0, 1000)
-  };
-
-  const matchResult = applyRules(service.rules, body, rawResponse);
-  if (matchResult) return matchResult;
-
-  return { color: "#808080", match: "no_match", raw_response: rawResponse };
-}
-
-/* ---------------------------- RULES ENGINE ----------------------------- */
-
-function applyRules(rules = [], text, raw_response) {
-  for (const rule of rules) {
-    const pattern = rule.pattern || rule.value;
-    if (!pattern) continue;
-
-    if (rule.match_type === "regex" || rule.type === "regex") {
-      const regex = new RegExp(pattern);
-      if (regex.test(text)) {
-        return { color: rule.color, match: pattern, raw_response };
-      }
-    }
-  }
-  return null;
-}
-
-
-// -------------------------------------------------------
-//  Background worker
-// -------------------------------------------------------
-async function pollServices() {
-  try {
-    const data = await readData();
-    const now = new Date();
-    let modified = false;
-
-    for (const service of data.services) {
-      const lastCheck = service.last_check ? new Date(service.last_check) : new Date(0);
-      const minutesSinceCheck = (now - lastCheck) / (1000 * 60);
-
-      if (minutesSinceCheck >= service.frequency) {
-        console.log(`Checking service: ${service.name}`);
-        const result = await checkService(service);
-
-        let history = await readHistory(service.id);
-        if (!Array.isArray(history)) history = [];
-
-        history.push({
-          datetime: now.toISOString(),
-          color: result.color,
-          match: result.match,
-          raw_response: result.raw_response
-        });
-
-        // Retention
-        const maxMs = (service.max_retention_hours || 24) * 3600 * 1000;
-        const cutoff = now - maxMs;
-
-        const filtered = history.filter(h => new Date(h.datetime) > cutoff);
-        const count = service.history_count || 24;
-
-        const finalHistory = filtered.slice(-count);
-
-        await writeHistory(service.id, finalHistory);
-
-        service.last_check = now.toISOString();
-        modified = true;
-      }
-    }
-
-    if (modified) {
-      await writeData(data);
-      console.log('Services updated');
-    }
-  } catch (err) {
-    console.error('Error in pollServices:', err);
-  }
-}
-
-function loadTLSConfig() {
-  const keyPath = process.env.TLS_KEY;
-  const certPath = process.env.TLS_CERT;
-  const caPath = process.env.TLS_CA;
-
-  if (!keyPath || !certPath) {
-    console.log("[TLS] No TLS_KEY / TLS_CERT provided → HTTPS disabled.");
-    return null;
-  }
-
-  if (!fsSync.existsSync(keyPath) || !fsSync.existsSync(certPath)) {
-    console.warn("[TLS] Provided TLS certificate paths do not exist → HTTPS disabled.");
-    return null;
-  }
-
-  try {
-    const config = {
-      key: fsSync.readFileSync(keyPath),
-      cert: fsSync.readFileSync(certPath)
-    };
-
-    if (caPath) {
-      if (!fsSync.existsSync(caPath)) {
-        console.warn("[mTLS] TLS_CA provided but file missing → ignoring CA.");
-      } else {
-        config.ca = fsSync.readFileSync(caPath);
-        config.requestCert = true;
-        config.rejectUnauthorized = process.env.TLS_REJECT_UNAUTHORIZED === "true";
-        console.log(`[mTLS] Enabled — requestCert=${config.requestCert}, rejectUnauthorized=${config.rejectUnauthorized}`);
-      }
-    }
-
-    console.log("[TLS] HTTPS enabled.");
-    return config;
-
-  } catch (err) {
-    console.error("[TLS] Failed to load certificates:", err);
-    return null;
-  }
-}
-
-loadTLSConfig.documentation = `
-Key Points:
-1. Loads TLS configuration for a Node.js server from environment variables.
-2. Requires TLS_KEY and TLS_CERT environment variables; returns null if missing.
-3. Validates that the specified key and certificate files exist.
-4. Reads key and certificate files synchronously.
-5. Supports optional TLS_CA for mutual TLS (mTLS).
-6. Enables mTLS by setting requestCert and rejectUnauthorized if TLS_CA is valid.
-7. Ignores TLS_CA if the file is missing and logs a warning.
-8. Returns a configuration object compatible with https.createServer.
-9. Returns null if TLS configuration cannot be loaded / is invalid.
-`
-
+// Starting service polling loop
 setInterval(pollServices, 6000);
 
-const PORT = process.env.PORT || 3000;
-
-const tlsConfig = loadTLSConfig();
-
-let server;
+// Starting server
 if (tlsConfig) {
   server = https.createServer(tlsConfig, app);
   server.listen(PORT, () => {
