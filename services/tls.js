@@ -1,43 +1,38 @@
-const fsSync = require('fs');
+const fs = require('fs');
 
-function loadTLSConfig() {
-  const keyPath = process.env.TLS_KEY;
-  const certPath = process.env.TLS_CERT;
-  const caPath = process.env.TLS_CA;
-  const tls_reject = process.env.TLS_REJECT_UNAUTHORIZED === "true";
-
+function loadTLSConfig({ keyPath, certPath, caPath, rejectUnauthorized = true }, log = true) {
   if (!keyPath || !certPath) {
-    console.log("[TLS] No TLS_KEY / TLS_CERT provided → HTTPS disabled.");
+    if(log) console.log("[TLS] No key or cert provided → HTTPS disabled.");
     return null;
   }
 
-  if (!fsSync.existsSync(keyPath) || !fsSync.existsSync(certPath)) {
-    console.warn("[TLS] Provided TLS certificate paths do not exist → HTTPS disabled.");
+  if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+    if(log) console.warn("[TLS] Provided TLS certificate paths do not exist → HTTPS disabled.");
     return null;
   }
 
   try {
     const config = {
-      key: fsSync.readFileSync(keyPath),
-      cert: fsSync.readFileSync(certPath)
+      key: fs.readFileSync(keyPath),
+      cert: fs.readFileSync(certPath)
     };
 
     if (caPath) {
-      if (!fsSync.existsSync(caPath)) {
-        console.warn("[mTLS] TLS_CA provided but file missing → ignoring CA.");
+      if (!fs.existsSync(caPath)) {
+        if(log) console.warn("[mTLS] TLS_CA provided but file missing → ignoring CA.");
       } else {
-        config.ca = fsSync.readFileSync(caPath);
+        config.ca = fs.readFileSync(caPath);
         config.requestCert = true;
-        config.rejectUnauthorized = tls_reject;
-        console.log(`[mTLS] Enabled — requestCert=${config.requestCert}, rejectUnauthorized=${config.rejectUnauthorized}`);
+        config.rejectUnauthorized = rejectUnauthorized;
+        if(log) console.log(`[mTLS] Enabled — requestCert=${config.requestCert}, rejectUnauthorized=${config.rejectUnauthorized}`);
       }
     }
 
-    console.log("[TLS] HTTPS enabled.");
+    if(log) console.log("[TLS] HTTPS enabled.");
     return config;
 
   } catch (err) {
-    console.error("[TLS] Failed to load certificates:", err);
+    if(log) console.error("[TLS] Failed to load certificates:", err);
     return null;
   }
 }
