@@ -2,7 +2,7 @@
 
 This guide explains a **very simplified** method to generate certificates for:
 
-* **Server TLS** (with SAN provided directly as command arguments)
+* **Server TLS**
 * **Client certificate for mTLS**
 * **No extra config files**
 * **No unnecessary OpenSSL files**
@@ -92,7 +92,7 @@ openssl req -new -key client.key -out client.csr -subj "/CN=client"
 ### 4.3 Sign client certificate with CA
 
 ```bash
-openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out client.crt -days 825 -sha256
+openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out client.crt -days 365 -sha256
 ```
 
 Files:
@@ -117,11 +117,6 @@ client.key
 client.csr
 client.crt
 ```
-
-No configs.
-No SAN files.
-No extra directories.
-Everything minimal.
 
 ---
 
